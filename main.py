@@ -7,6 +7,15 @@ from collections import Counter
 import string
 import pymorphy3
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
@@ -205,7 +214,7 @@ def print_chapter_results(chapters):
         print(f"Всего предложений в главе: {sent_total}")
         print(f"Всего глаголов в главе: {verb_total}")
 
-        print(f"\n--- РАСПРЕДЕЛЕНИЕ ПРЕДЛОЖЕНИЙ ПО ТОНАЛЬНОСТИ ---")
+        print(f"\nРАСПРЕДЕЛЕНИЕ ПРЕДЛОЖЕНИЙ ПО ТОНАЛЬНОСТИ")
         print(f"{'Тональность':<20} {'Кол-во':<10} {'Доля':<10}")
         print("-" * 45)
         for sentiment in [1, 2, 3, 4]:
@@ -215,7 +224,7 @@ def print_chapter_results(chapters):
         print("-" * 45)
         print(f"{'ИТОГО':<20} {sent_total:<10} 100.00%")
 
-        print(f"\n--- РАСПРЕДЕЛЕНИЕ ГЛАГОЛОВ ПО НАКЛОНЕНИЮ ---")
+        print(f"\nРАСПРЕДЕЛЕНИЕ ГЛАГОЛОВ ПО НАКЛОНЕНИЮ")
         print(f"{'Наклонение':<20} {'Кол-во':<10} {'Доля':<10}")
         print("-" * 45)
         for mood in ['изъявительное', 'повелительное', 'сослагательное']:
@@ -259,7 +268,7 @@ def print_total_results(data):
     print(f"\nВсего предложений в тексте: {sent_total}")
     print(f"Всего глаголов в тексте: {verb_total}")
 
-    print(f"\n--- РАСПРЕДЕЛЕНИЕ ПРЕДЛОЖЕНИЙ ПО ТОНАЛЬНОСТИ ---")
+    print(f"\nРАСПРЕДЕЛЕНИЕ ПРЕДЛОЖЕНИЙ ПО ТОНАЛЬНОСТИ")
     print(f"{'Тональность':<20} {'Кол-во':<10} {'Доля':<10}")
     print("-" * 45)
     for sentiment in [1, 2, 3, 4]:
@@ -269,7 +278,7 @@ def print_total_results(data):
     print("-" * 45)
     print(f"{'ИТОГО':<20} {sent_total:<10} 100.00%")
 
-    print(f"\n--- РАСПРЕДЕЛЕНИЕ ГЛАГОЛОВ ПО НАКЛОНЕНИЮ ---")
+    print(f"\nРАСПРЕДЕЛЕНИЕ ГЛАГОЛОВ ПО НАКЛОНЕНИЮ")
     print(f"{'Наклонение':<20} {'Кол-во':<10} {'Доля':<10}")
     print("-" * 45)
     for mood in ['изъявительное', 'повелительное', 'сослагательное']:
@@ -278,6 +287,152 @@ def print_total_results(data):
         print(f"{mood_names[mood]:<20} {count:<10} {share:.2f}%")
     print("-" * 45)
     print(f"{'ИТОГО':<20} {verb_total:<10} 100.00%")
+
+
+def prepare_texts_and_labels(data):
+    """
+    Подготавливает тексты и метки для машинного обучения.
+    Возвращает список текстов и список меток.
+    """
+    texts = [item['text'] for item in data]
+    labels = [item['sentiment'] for item in data]
+    return texts, labels
+
+
+def create_tfidf_matrix(texts, max_features=5000, ngram_range=(1, 2)):
+    """
+    Создаёт TF-IDF матрицу из списка текстов.
+    Возвращает матрицу признаков и векторизатор.
+    """
+    vectorizer = TfidfVectorizer(
+        max_features=max_features,
+        ngram_range=ngram_range,
+        min_df=2,
+        max_df=0.9
+    )
+    X = vectorizer.fit_transform(texts)
+    print(f"TF-IDF матрица создана. Размер: {X.shape}")
+    return X, vectorizer
+
+
+def train_logistic_regression(X_train, y_train):
+    """Обучает модель логистической регрессии"""
+    model = LogisticRegression(
+        max_iter=1000,
+        C=1.0,
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+    print("Логистическая регрессия обучена")
+    return model
+
+
+def train_decision_tree(X_train, y_train):
+    """Обучает модель дерева решений"""
+    model = DecisionTreeClassifier(
+        max_depth=10,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+    print("Дерево решений обучено")
+    return model
+
+
+def evaluate_model(model, X_test, y_test, model_name):
+    """
+    Оценивает модель и выводит метрики качества.
+    Возвращает accuracy.
+    """
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+
+    print(f"\n{model_name}")
+    print(f"Accuracy: {accuracy:.4f}")
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
+
+    # Матрица ошибок
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['Отриц.', 'Нейтр.', 'Пол.', 'Неодн.'],
+                yticklabels=['Отриц.', 'Нейтр.', 'Пол.', 'Неодн.'])
+    plt.title(f'Матрица ошибок - {model_name}')
+    plt.xlabel('Предсказанный класс')
+    plt.ylabel('Истинный класс')
+    plt.tight_layout()
+    plt.savefig(f'confusion_matrix_{model_name}.png')
+    plt.show()
+
+    return accuracy, y_pred
+
+
+def compare_models(models_results):
+    """
+    Сравнивает результаты нескольких моделей.
+    models_results: список словарей с ключами 'name', 'accuracy'
+    """
+    df = pd.DataFrame(models_results)
+    print("\nСРАВНИТЕЛЬНЫЙ АНАЛИЗ МОДЕЛЕЙ")
+    print(df.to_string(index=False))
+
+    # Визуализация сравнения
+    plt.figure(figsize=(8, 5))
+    bars = plt.bar(df['name'], df['accuracy'], color=['blue', 'green'])
+    plt.xlabel('Модель')
+    plt.ylabel('Accuracy')
+    plt.title('Сравнение точности моделей')
+    plt.ylim(0, 1)
+    for bar, acc in zip(bars, df['accuracy']):
+        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                 f'{acc:.4f}', ha='center', va='bottom')
+    plt.tight_layout()
+    plt.savefig('models_comparison.png')
+    plt.show()
+
+
+def run_ml_experiment(data):
+    """
+    Запускает эксперимент по машинному обучению:
+    - векторизация текстов
+    - обучение моделей
+    - оценка качества
+    - сравнительный анализ
+    """
+    print("ЭКСПЕРИМЕНТ ПО МАШИННОМУ ОБУЧЕНИЮ")
+
+    # Подготовка данных
+    texts, labels = prepare_texts_and_labels(data)
+    print(f"Всего примеров: {len(texts)}")
+
+    # TF-IDF векторизация
+    X, vectorizer = create_tfidf_matrix(texts)
+
+    # Разделение на обучающую и тестовую выборки (80% / 20%)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, labels, test_size=0.2, random_state=42, stratify=labels
+    )
+    print(f"Обучающая выборка: {X_train.shape[0]} примеров")
+    print(f"Тестовая выборка: {X_test.shape[0]} примеров")
+
+    # Обучение моделей
+    lr_model = train_logistic_regression(X_train, y_train)
+    dt_model = train_decision_tree(X_train, y_train)
+
+    # Оценка моделей
+    acc_lr, _ = evaluate_model(lr_model, X_test, y_test, "Логистическая регрессия")
+    acc_dt, _ = evaluate_model(dt_model, X_test, y_test, "Дерево решений")
+
+    # Сравнительный анализ
+    results = [
+        {'name': 'Логистическая регрессия', 'accuracy': acc_lr},
+        {'name': 'Дерево решений', 'accuracy': acc_dt}
+    ]
+    compare_models(results)
+
+    return lr_model, dt_model, vectorizer
 
 
 def main(docx_path):
@@ -299,7 +454,9 @@ def main(docx_path):
     print_total_results(data)
     print_chapter_results(chapters)
 
-    return chapters
+    lr_model, dt_model, vectorizer = run_ml_experiment(data)
+
+    return chapters, lr_model, dt_model, vectorizer
 
 
 if __name__ == "__main__":
